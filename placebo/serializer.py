@@ -12,9 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import io
 from datetime import datetime, timedelta, tzinfo
-from botocore.response import StreamingBody
-from six import StringIO
+
 
 class UTC(tzinfo):
     """UTC"""
@@ -28,22 +28,28 @@ class UTC(tzinfo):
     def dst(self, dt):
         return timedelta(0)
 
+
 utc = UTC()
+
 
 def deserialize(obj):
     """Convert JSON dicts back into objects."""
     # Be careful of shallow copy here
     target = dict(obj)
     class_name = None
-    if '__class__' in target:
-        class_name = target.pop('__class__')
-    if '__module__' in obj:
-        module_name = obj.pop('__module__')
+    if "__class__" in target:
+        class_name = target.pop("__class__")
+    if "__module__" in obj:
+        module_name = obj.pop("__module__")
     # Use getattr(module, class_name) for custom types if needed
-    if class_name == 'datetime':
+    if class_name == "datetime":
         return datetime(tzinfo=utc, **target)
-    if class_name == 'StreamingBody':
-        return StringIO(target['body'])
+    if class_name == "BytesIO":
+        targ = target["body"]
+        targ_body = (
+            targ.encode("utf-8") if isinstance(targ, str) else bytes(target["body"])
+        )
+        return io.BytesIO(targ_body)
     # Return unrecognized structures as-is
     return obj
 
@@ -51,25 +57,28 @@ def deserialize(obj):
 def serialize(obj):
     """Convert objects into JSON structures."""
     # Record class and module information for deserialization
-    result = {'__class__': obj.__class__.__name__}
+    result = {"__class__": obj.__class__.__name__}
     try:
-        result['__module__'] = obj.__module__
+        result["__module__"] = obj.__module__
     except AttributeError:
         pass
     # Convert objects to dictionary representation based on type
     if isinstance(obj, datetime):
-        result['year'] = obj.year
-        result['month'] = obj.month
-        result['day'] = obj.day
-        result['hour'] = obj.hour
-        result['minute'] = obj.minute
-        result['second'] = obj.second
-        result['microsecond'] = obj.microsecond
+        result["year"] = obj.year
+        result["month"] = obj.month
+        result["day"] = obj.day
+        result["hour"] = obj.hour
+        result["minute"] = obj.minute
+        result["second"] = obj.second
+        result["microsecond"] = obj.microsecond
         return result
-    if isinstance(obj, StreamingBody):
-        result['body'] = obj.read()
-        obj._raw_stream = StringIO(result['body'])
-        obj._amount_read = 0
+    if isinstance(obj, io.BytesIO):
+        body = obj.read()
+        try:
+            result["body"] = body.decode("utf-8")
+        except UnicodeError:
+            # Could be turned back to bytes `bytes(result['body'])`
+            result["body"] = list(body)
         return result
     # Raise a TypeError if the object isn't recognized
     raise TypeError("Type not serializable")
